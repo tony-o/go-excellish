@@ -37,10 +37,29 @@ type GlobalEnv map[string]func([]Token) (interface{}, error)
 
 var DefaultEnv *Env = &Env{
 	Values: map[string]interface{}{
+		"SUMIF": func(ts []Token) (t Token, e error) {
+			defer func() {
+				if recover() != nil {
+					e = errors.New("Field for SUMIF is not a number or received a bad filter")
+				}
+			}()
+			var f float64 = 0
+			filter := ts[len(ts)-1].Value.([]Token)
+			for idx, t := range ts[:len(ts)-1] {
+				if !filter[idx].Value.(bool) {
+					continue
+				}
+				f += t.Value.(float64)
+			}
+			return *(&Token{
+				Type:  Static,
+				Value: f,
+			}), nil
+		},
 		"SUM": func(ts []Token) (t Token, e error) {
 			defer func() {
 				if recover() != nil {
-					e = errors.New("Field for sum is not a number")
+					e = errors.New("Field for SUM is not a number")
 				}
 			}()
 			var f float64 = 0
@@ -54,6 +73,73 @@ var DefaultEnv *Env = &Env{
 		},
 		"CONCAT": func(t []Token) (interface{}, error) {
 			return nil, nil
+		},
+		"=": func(ts []Token) (Token, error) {
+			l := len(ts) - 1
+			var rts []Token = make([]Token, 0)
+			for i := 0; i < l; i++ {
+				if fmt.Sprint(ts[l].Value) == fmt.Sprint(ts[i].Value) {
+					rts = append(rts, *(&Token{
+						Value: true,
+						Type:  Static,
+					}))
+				} else {
+					rts = append(rts, *(&Token{
+						Value: false,
+						Type:  Static,
+					}))
+				}
+			}
+			return *(&Token{
+				Value: rts,
+				Type:  Scope,
+			}), nil
+		},
+		">": func(ts []Token) (Token, error) {
+			l := len(ts) - 1
+			var rts []Token = make([]Token, 0)
+			b := ts[l].Value
+			strcmp := true
+			switch b.(type) {
+			case float64:
+				strcmp = false
+			}
+			for i := 0; i < l; i++ {
+				a := ts[i].Value
+				if !strcmp {
+					switch a.(type) {
+					case float64:
+						if a.(float64) > b.(float64) {
+							rts = append(rts, *(&Token{
+								Value: true,
+								Type:  Static,
+							}))
+						} else {
+							rts = append(rts, *(&Token{
+								Value: false,
+								Type:  Static,
+							}))
+						}
+						continue
+					}
+				}
+				fmt.Print(" %v strcmp %v\n", fmt.Sprint(ts[l].Value), fmt.Sprint(ts[i].Value))
+				if fmt.Sprint(b) > fmt.Sprint(a) {
+					rts = append(rts, *(&Token{
+						Value: true,
+						Type:  Static,
+					}))
+				} else {
+					rts = append(rts, *(&Token{
+						Value: false,
+						Type:  Static,
+					}))
+				}
+			}
+			return *(&Token{
+				Value: rts,
+				Type:  Scope,
+			}), nil
 		},
 		"+": func(ts []Token) (Token, error) {
 			// Degradation float64 -> string
@@ -417,7 +503,7 @@ func parseFunction(idx int, s string) (Token, int, bool) {
 
 func parseOperator(idx int, s string) (Token, int, error) {
 	st := (string)(s[idx])
-	if st == "+" || st == "-" || st == "*" || st == "/" {
+	if st == "+" || st == "-" || st == "*" || st == "/" || st == "=" || st == ">" {
 		return *(&Token{
 			Type:     Operator,
 			Value:    st,
