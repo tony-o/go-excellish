@@ -5,6 +5,7 @@ import (
 
 	lr "example.com/lr/src"
 	"github.com/gofrs/uuid"
+	"github.com/loov/hrtime"
 )
 
 // TYPES
@@ -53,6 +54,7 @@ func main() {
 		"\"hello: \" + concat(\"world\", \"!\")": "\"hello: \" + concat(\"world\", \"!\")",
 		"sumif([price], [name] = 'Prod 1')":      "",
 		"sumif([price], [price] > 2)":            "",
+		"sum([name])":                            "",
 	}
 	for k, v := range OK {
 		l := lr.NewParser()
@@ -60,21 +62,35 @@ func main() {
 		if v == "" {
 			e = k
 		}
+		bench := hrtime.NewBenchmark(1000)
+		runn1 := hrtime.NewBenchmark(1000)
+		runn2 := hrtime.NewBenchmark(1000)
+		for bench.Next() {
+			l.Parse(e)
+		}
 		err := l.Parse(e)
 		if err == nil {
 			fmt.Printf("[CALCULATED FIELD]")
+			fmt.Printf("\n[COMPILATION]\n")
+			fmt.Println(bench.Histogram(10))
 		} else {
 			fmt.Printf("[INCALCULABLE]")
 		}
 		fmt.Printf(" %s", e)
 		if err != nil {
 			fmt.Printf("%v", err)
+			continue
 		}
 		fmt.Printf("\n[AST]\n%s\n", l.AST())
 		applies, err := l.AppliesTo(prod)
 		if applies && err == nil {
 			r, e := l.Run(prod)
 			fmt.Printf("[APPLYING] &Product{}\n  result=%v\n  error=%v\n", r, e)
+			for runn1.Next() {
+				l.Run(prods...)
+			}
+			fmt.Printf("[RUN SINGLE INPUT]\n")
+			fmt.Println(runn1.Histogram(10))
 		} else {
 			fmt.Printf("[SKIPPING] &Product{}: %v\n", err)
 		}
@@ -82,6 +98,11 @@ func main() {
 		if applies && err == nil {
 			r, e := l.Run(prods...)
 			fmt.Printf("[APPLYING] []Product\n  result=%v\n  error=%v\n", r, e)
+			for runn2.Next() {
+				l.Run(prods...)
+			}
+			fmt.Printf("[RUN MULTI INPUT]\n")
+			fmt.Println(runn2.Histogram(10))
 		} else {
 			fmt.Printf("[SKIPPING] []Product: %v\n", err)
 		}
