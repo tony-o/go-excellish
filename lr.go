@@ -41,18 +41,18 @@ func main() {
 		*(&Product{ID: uuid.Must(uuid.NewV4()), Name: "Prod 3", Price: 3.33}),
 	}
 	OK := map[string]string{
-		//"[name] + '++'":                          "",
-		//"[name] + ': ' + [price]":                "",
-		//"sum([price])":                           "",
-		//"sum([price], [amount])":                 "",
-		//"([price] + [amount]) * 1":               "",
-		//"(((((((((([price]))))))))))":            "",
-		//"SUM([loans], [xyzs])":                   "SUM([loans], [xyzs])",
-		//"    5 +     6.1235566777":               "     5+    6.1235566777",
-		//"\"escaped \\\" q\"":                     "\"escaped \\\" q\"",
-		//"\"hello: \" + concat(\"world\", \"!\")": "\"hello: \" + concat(\"world\", \"!\")",
-		"sumif([price], [name] = 'Prod 1')": "",
-		"sumif([price], [price] > 2)":       "",
+		"[name] + '++'":                          "",
+		"[name] + ': ' + [price]":                "",
+		"sum([price])":                           "",
+		"sum([price], [amount])":                 "",
+		"([price] + [amount]) * 1":               "",
+		"(((((((((([price]))))))))))":            "",
+		"SUM([loans], [xyzs])":                   "SUM([loans], [xyzs])",
+		"    5 +     6.1235566777":               "     5+    6.1235566777",
+		"\"escaped \\\" q\"":                     "\"escaped \\\" q\"",
+		"\"hello: \" + concat(\"world\", \"!\")": "\"hello: \" + concat(\"world\", \"!\")",
+		"sumif([price], [name] = 'Prod 1')":      "",
+		"sumif([price], [price] > 2)":            "",
 	}
 	for k, v := range OK {
 		l := lr.NewParser()
