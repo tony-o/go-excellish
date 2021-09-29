@@ -3,6 +3,7 @@ package lr
 import (
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -32,8 +33,6 @@ type Env struct {
 	Values map[string]interface{}
 	Parent *Env
 }
-
-type GlobalEnv map[string]func([]Token) (interface{}, error)
 
 var DefaultEnv *Env = &Env{
 	Values: map[string]interface{}{
@@ -77,8 +76,34 @@ var DefaultEnv *Env = &Env{
 		"=": func(ts []Token) (Token, error) {
 			l := len(ts) - 1
 			var rts []Token = make([]Token, 0)
+			last := ts[l].Value
+			var floatVal float64
+			floatCmp := false
+			switch last.(type) {
+			case float64:
+				floatVal = last.(float64)
+				floatCmp = true
+			}
 			for i := 0; i < l; i++ {
-				if fmt.Sprint(ts[l].Value) == fmt.Sprint(ts[i].Value) {
+				cVal := ts[i].Value
+				if floatCmp {
+					switch cVal.(type) {
+					case float64:
+						if math.Abs(cVal.(float64)-floatVal) < .00001 {
+							rts = append(rts, *(&Token{
+								Value: true,
+								Type:  Static,
+							}))
+						} else {
+							rts = append(rts, *(&Token{
+								Value: false,
+								Type:  Static,
+							}))
+						}
+						continue
+					}
+				}
+				if fmt.Sprint(cVal) == fmt.Sprint(last) {
 					rts = append(rts, *(&Token{
 						Value: true,
 						Type:  Static,
@@ -123,7 +148,6 @@ var DefaultEnv *Env = &Env{
 						continue
 					}
 				}
-				fmt.Print(" %v strcmp %v\n", fmt.Sprint(ts[l].Value), fmt.Sprint(ts[i].Value))
 				if fmt.Sprint(b) > fmt.Sprint(a) {
 					rts = append(rts, *(&Token{
 						Value: true,
@@ -139,6 +163,21 @@ var DefaultEnv *Env = &Env{
 			return *(&Token{
 				Value: rts,
 				Type:  Scope,
+			}), nil
+		},
+		"/": func(ts []Token) (t Token, e error) {
+			defer func() {
+				if recover() != nil {
+					e = errors.New("Field for / is not a number")
+				}
+			}()
+			f := ts[0].Value.(float64)
+			for _, t := range ts[1:] {
+				f /= t.Value.(float64)
+			}
+			return *(&Token{
+				Value: f,
+				Type:  Static,
 			}), nil
 		},
 		"+": func(ts []Token) (Token, error) {
@@ -187,9 +226,7 @@ var DefaultEnv *Env = &Env{
 
 type LR struct {
 	Tokens, fields []Token
-	Global         Env
-
-	fieldCache map[string]int
+	fieldCache     map[string]int
 }
 
 // INTERFACES
@@ -207,7 +244,6 @@ var _ LRI = (*LR)(nil)
 // IMPLEMENTATION
 func NewParser() *LR {
 	lr := &LR{
-		Global:     *(&Env{}),
 		Tokens:     make([]Token, 0),
 		fields:     make([]Token, 0), //premature optimization
 		fieldCache: make(map[string]int),
@@ -326,6 +362,14 @@ func (lr *LR) ast(tokens []Token, depth int) string {
 	return ast
 }
 
+var opprec map[string]int = map[string]int{
+	"/": 10,
+	"*": 10,
+	"-": 5,
+	"+": 5,
+	"=": 0,
+}
+
 func (lr *LR) tokenize(s string) error {
 	idx := (int)(0)
 	ws := regexp.MustCompile(`^[, \t\r\n]+`)
@@ -390,25 +434,42 @@ func (lr *LR) tokenize(s string) error {
 		}
 
 		// reducers
-		// a <operator> b
+		// a <operator> b, with precedence
 		reduce := stack[stacklen]
 		reducelen := len(reduce) - 1
 		if reducelen >= 2 && reduce[reducelen-1].Type == Operator {
 			a := reduce[reducelen-2]
 			o := reduce[reducelen-1]
 			b := reduce[reducelen]
-			reduce = append(reduce[0:reducelen-2], *(&Token{
-				Type:     FuncScope,
-				Value:    []Token{o, a, b},
-				Position: o.Position,
-			}))
+			h := false
+			if a.Type == Scope || a.Type == FuncScope {
+				op1, ok1 := a.Value.([]Token)[0].Value.(string)
+				if ok1 {
+					if prec, ok := opprec[op1]; ok {
+						if prec2, ok := opprec[o.Value.(string)]; ok {
+							if prec2 > prec {
+								a.Value = append(a.Value.([]Token)[:len(a.Value.([]Token))-1], *(&Token{
+									Type:     FuncScope,
+									Value:    []Token{o, a.Value.([]Token)[len(a.Value.([]Token))-1], b},
+									Position: o.Position,
+								}))
+								reduce[reducelen-2] = a
+								reduce = reduce[:reducelen-1]
+								h = true
+							}
+						}
+					}
+				}
+			}
+			if !h {
+				reduce = append(reduce[0:reducelen-2], *(&Token{
+					Type:     FuncScope,
+					Value:    []Token{o, a, b},
+					Position: o.Position,
+				}))
+			}
 			stack[stacklen] = reduce
 		}
-		// reduce func( ... )
-		/*if reducelen >= 1 && reduce[reducelen-1].Type == Function {
-			//TODO
-			fmt.Printf("  func(...) -> %v\n", stack)
-		}*/
 	}
 	if len(stack) != 1 {
 		return errorWithLineAndPos(idx, "Unknown error")

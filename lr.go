@@ -48,13 +48,17 @@ func main() {
 		"sum([price], [amount])":                 "",
 		"([price] + [amount]) * 1":               "",
 		"(((((((((([price]))))))))))":            "",
-		"SUM([loans], [xyzs])":                   "SUM([loans], [xyzs])",
-		"    5 +     6.1235566777":               "     5+    6.1235566777",
-		"\"escaped \\\" q\"":                     "\"escaped \\\" q\"",
-		"\"hello: \" + concat(\"world\", \"!\")": "\"hello: \" + concat(\"world\", \"!\")",
+		"SUM([loans], [xyzs])":                   "",
+		"    5 +     6.1235566777":               "",
+		"\"escaped \\\" q\"":                     "",
+		"\"hello: \" + concat(\"world\", \"!\")": "",
 		"sumif([price], [name] = 'Prod 1')":      "",
 		"sumif([price], [price] > 2)":            "",
 		"sum([name])":                            "",
+		"1 + 2 / 3":                              "",
+		"1 + 2 / 3 = (2 / 3) + 1":                "",
+		"1 + 2 / 3 = 1":                          "",
+		" 1 + 2 = 5 + 'hello'":                   "",
 	}
 	for k, v := range OK {
 		l := lr.NewParser()
@@ -66,7 +70,7 @@ func main() {
 		runn1 := hrtime.NewBenchmark(1000)
 		runn2 := hrtime.NewBenchmark(1000)
 		for bench.Next() {
-			l.Parse(e)
+			//l.Parse(e)
 		}
 		err := l.Parse(e)
 		if err == nil {
@@ -78,7 +82,7 @@ func main() {
 		}
 		fmt.Printf(" %s", e)
 		if err != nil {
-			fmt.Printf("%v", err)
+			fmt.Printf("\n%v\n", err)
 			continue
 		}
 		fmt.Printf("\n[AST]\n%s\n", l.AST())
@@ -87,7 +91,7 @@ func main() {
 			r, e := l.Run(prod)
 			fmt.Printf("[APPLYING] &Product{}\n  result=%v\n  error=%v\n", r, e)
 			for runn1.Next() {
-				l.Run(prods...)
+				//l.Run(prods...)
 			}
 			fmt.Printf("[RUN SINGLE INPUT]\n")
 			fmt.Println(runn1.Histogram(10))
@@ -99,7 +103,7 @@ func main() {
 			r, e := l.Run(prods...)
 			fmt.Printf("[APPLYING] []Product\n  result=%v\n  error=%v\n", r, e)
 			for runn2.Next() {
-				l.Run(prods...)
+				//l.Run(prods...)
 			}
 			fmt.Printf("[RUN MULTI INPUT]\n")
 			fmt.Println(runn2.Histogram(10))
