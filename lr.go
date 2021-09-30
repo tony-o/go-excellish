@@ -24,9 +24,8 @@ type Product struct {
 }
 
 type Cart struct {
-	ID       uuid.UUID
-	Products []Product
-	Status   Status
+	Product *Product
+	Amount  int
 }
 
 // METHODS
@@ -41,6 +40,33 @@ func main() {
 		*(&Product{ID: uuid.Must(uuid.NewV4()), Name: "Prod 2", Price: 2.22}),
 		*(&Product{ID: uuid.Must(uuid.NewV4()), Name: "Prod 3", Price: 3.33}),
 	}
+
+	cart := &Cart{
+		Product: &Product{ID: uuid.Must(uuid.NewV4()), Name: "Prod 1", Price: 1.11},
+		Amount:  5,
+	}
+	cartParser := lr.NewParser()
+	err := cartParser.Parse("[product.price] * 10")
+	if err != nil {
+		fmt.Printf("cartParser err=%v\n", err)
+	}
+	okcart, err := cartParser.AppliesTo(cart)
+	if err != nil {
+		fmt.Printf("cartParser applies err=%v\n", err)
+	}
+	fmt.Printf("%s\n", cartParser.AST())
+	if okcart {
+		r, e := cartParser.Run(cart)
+		if e != nil {
+			fmt.Printf("cart run err=%v\n", e)
+		} else {
+			fmt.Printf("product.price * 10 = %f * 10 = %v\n", cart.Product.Price, r)
+		}
+	} else {
+		fmt.Printf("doesn't apply\n")
+	}
+	return
+
 	OK := map[string]string{
 		"[name] + '++'":                          "",
 		"[name] + ': ' + [price]":                "",
@@ -70,7 +96,7 @@ func main() {
 		runn1 := hrtime.NewBenchmark(1000)
 		runn2 := hrtime.NewBenchmark(1000)
 		for bench.Next() {
-			//l.Parse(e)
+			l.Parse(e)
 		}
 		err := l.Parse(e)
 		if err == nil {
@@ -91,7 +117,7 @@ func main() {
 			r, e := l.Run(prod)
 			fmt.Printf("[APPLYING] &Product{}\n  result=%v\n  error=%v\n", r, e)
 			for runn1.Next() {
-				//l.Run(prods...)
+				l.Run(prods...)
 			}
 			fmt.Printf("[RUN SINGLE INPUT]\n")
 			fmt.Println(runn1.Histogram(10))
@@ -103,7 +129,7 @@ func main() {
 			r, e := l.Run(prods...)
 			fmt.Printf("[APPLYING] []Product\n  result=%v\n  error=%v\n", r, e)
 			for runn2.Next() {
-				//l.Run(prods...)
+				l.Run(prods...)
 			}
 			fmt.Printf("[RUN MULTI INPUT]\n")
 			fmt.Println(runn2.Histogram(10))

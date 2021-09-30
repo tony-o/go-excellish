@@ -165,6 +165,21 @@ var DefaultEnv *Env = &Env{
 				Type:  Scope,
 			}), nil
 		},
+		"*": func(ts []Token) (t Token, e error) {
+			defer func() {
+				if recover() != nil {
+					e = errors.New("Field for * is not a number")
+				}
+			}()
+			f := ts[0].Value.(float64)
+			for _, t := range ts[1:] {
+				f *= t.Value.(float64)
+			}
+			return *(&Token{
+				Value: f,
+				Type:  Static,
+			}), nil
+		},
 		"/": func(ts []Token) (t Token, e error) {
 			defer func() {
 				if recover() != nil {
@@ -251,6 +266,25 @@ func NewParser() *LR {
 	return lr
 }
 
+func resolvePath(s interface{}, path []string) (interface{}, bool) {
+	if (s == nil && len(path) > 0) || len(path) == 0 {
+		return nil, false
+	}
+	v := reflect.Indirect(reflect.ValueOf(s))
+	lci := make(map[string]int)
+	for i := 0; i < v.NumField(); i++ {
+		lci[strings.ToLower(v.Type().Field(i).Name)] = i
+	}
+	if _, ok := lci[path[0]]; ok {
+		if len(path) > 1 {
+			//TODO: handle array of <type>
+			return resolvePath(v.Field(lci[strings.ToLower(path[0])]).Interface(), path[1:])
+		}
+		return v.Field(lci[strings.ToLower(path[0])]).Interface(), true
+	}
+	return nil, false
+}
+
 func (lr *LR) AppliesTo(s ...interface{}) (bool, error) {
 	checked := make(map[string]bool)
 	for _, o := range s {
@@ -259,14 +293,10 @@ func (lr *LR) AppliesTo(s ...interface{}) (bool, error) {
 		if _, ok := checked[tt]; ok {
 			continue
 		}
-		v := reflect.Indirect(reflect.ValueOf(o))
-		lcfields := make(map[string]string)
-		for i := 0; i < v.NumField(); i++ {
-			lcfields[strings.ToLower(v.Type().Field(i).Name)] = v.Type().Field(i).Name
-			lr.fieldCache[strings.ToLower(v.Type().Field(i).Name)] = i
-		}
-		for _, tok := range lr.fields {
-			if _, ok := lcfields[strings.ToLower(tok.Value.(string))]; !ok {
+		for _, f := range lr.fields {
+			path := strings.Split(f.Value.(string), ".")
+			_, b := resolvePath(o, path)
+			if !b {
 				return false, nil
 			}
 		}
@@ -316,9 +346,12 @@ func (lr *LR) run(tokens []Token, s ...interface{}) ([]interface{}, error) {
 			rval = append(rval, x)
 		case Field:
 			for _, t := range s {
-				v := reflect.Indirect(reflect.ValueOf(t))
+				v, b := resolvePath(t, strings.Split(strings.ToLower(x.Value.(string)), "."))
+				if !b {
+					return nil, errors.New("Field is unresolveable")
+				}
 				rval = append(rval, *(&Token{
-					Value:    v.Field(lr.fieldCache[strings.ToLower(x.Value.(string))]).Interface(),
+					Value:    v,
 					Type:     Static,
 					Position: x.Position,
 				}))
