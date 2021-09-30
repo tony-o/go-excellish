@@ -24,8 +24,9 @@ type Product struct {
 }
 
 type Cart struct {
-	Product *Product
-	Amount  int
+	Product  *Product
+	Products *[]Product
+	Amount   int
 }
 
 // METHODS
@@ -43,7 +44,12 @@ func main() {
 
 	cart := &Cart{
 		Product: &Product{ID: uuid.Must(uuid.NewV4()), Name: "Prod 1", Price: 1.11},
-		Amount:  5,
+		Products: (&[]Product{
+			*&Product{ID: uuid.Must(uuid.NewV4()), Name: "Prod 1", Price: 1.11},
+			*&Product{ID: uuid.Must(uuid.NewV4()), Name: "Prod 2", Price: 2.22},
+			*&Product{ID: uuid.Must(uuid.NewV4()), Name: "Prod 3", Price: 3.33},
+		}),
+		Amount: 5,
 	}
 	cartParser := lr.NewParser()
 	err := cartParser.Parse("[product.price] * 10")
@@ -65,7 +71,25 @@ func main() {
 	} else {
 		fmt.Printf("doesn't apply\n")
 	}
-	return
+	err = cartParser.Parse("sum([products.price]) * 100")
+	if err != nil {
+		fmt.Printf("cartParser err=%v\n", err)
+	}
+	okcart, err = cartParser.AppliesTo(cart)
+	if err != nil {
+		fmt.Printf("cartParser applies err=%v\n", err)
+	}
+	fmt.Printf("%s\n", cartParser.AST())
+	if okcart {
+		r, e := cartParser.Run(cart)
+		if e != nil {
+			fmt.Printf("cart run err=%v\n", e)
+		} else {
+			fmt.Printf("products.price * 100 = %f * 100 = %v\n", 6.66, r)
+		}
+	} else {
+		fmt.Printf("[products.price] doesn't apply\n")
+	}
 
 	OK := map[string]string{
 		"[name] + '++'":                          "",

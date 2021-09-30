@@ -241,17 +241,18 @@ var DefaultEnv *Env = &Env{
 
 type LR struct {
 	Tokens, fields []Token
-	fieldCache     map[string]int
 }
 
 // INTERFACES
 type LRI interface {
-	Parse(_ string) error
-	Run(_ ...interface{}) ([]interface{}, error)
+	Parse(string) error
+	Run(...interface{}) ([]interface{}, error)
 	AST() string
-	AppliesTo(_ ...interface{}) (bool, error)
+	AppliesTo(...interface{}) (bool, error)
 
 	tokenize(_ string) error
+	run([]Token, ...interface{}) ([]interface{}, error)
+	ast([]Token, int) string
 }
 
 var _ LRI = (*LR)(nil)
@@ -259,28 +260,42 @@ var _ LRI = (*LR)(nil)
 // IMPLEMENTATION
 func NewParser() *LR {
 	lr := &LR{
-		Tokens:     make([]Token, 0),
-		fields:     make([]Token, 0), //premature optimization
-		fieldCache: make(map[string]int),
+		Tokens: make([]Token, 0),
+		fields: make([]Token, 0), //premature optimization
 	}
 	return lr
 }
 
-func resolvePath(s interface{}, path []string) (interface{}, bool) {
+func resolvePath(s interface{}, path []string, forEval bool) ([]interface{}, bool) {
 	if (s == nil && len(path) > 0) || len(path) == 0 {
 		return nil, false
 	}
 	v := reflect.Indirect(reflect.ValueOf(s))
+	if v.Kind() == reflect.Slice {
+		if forEval {
+			var r []interface{} = make([]interface{}, 0)
+			for j := 0; j < v.Len(); j++ {
+				ii := v.Index(j).Interface()
+				res, bb := resolvePath(ii, path, forEval)
+				if !bb {
+					return nil, bb
+				}
+				r = append(r, res...)
+			}
+			return r, true
+		} else {
+			v = reflect.Indirect(v.Index(0))
+		}
+	}
 	lci := make(map[string]int)
 	for i := 0; i < v.NumField(); i++ {
 		lci[strings.ToLower(v.Type().Field(i).Name)] = i
 	}
 	if _, ok := lci[path[0]]; ok {
 		if len(path) > 1 {
-			//TODO: handle array of <type>
-			return resolvePath(v.Field(lci[strings.ToLower(path[0])]).Interface(), path[1:])
+			return resolvePath(v.Field(lci[strings.ToLower(path[0])]).Interface(), path[1:], forEval)
 		}
-		return v.Field(lci[strings.ToLower(path[0])]).Interface(), true
+		return []interface{}{v.Field(lci[strings.ToLower(path[0])]).Interface()}, true
 	}
 	return nil, false
 }
@@ -295,7 +310,7 @@ func (lr *LR) AppliesTo(s ...interface{}) (bool, error) {
 		}
 		for _, f := range lr.fields {
 			path := strings.Split(f.Value.(string), ".")
-			_, b := resolvePath(o, path)
+			_, b := resolvePath(o, path, false)
 			if !b {
 				return false, nil
 			}
@@ -346,15 +361,18 @@ func (lr *LR) run(tokens []Token, s ...interface{}) ([]interface{}, error) {
 			rval = append(rval, x)
 		case Field:
 			for _, t := range s {
-				v, b := resolvePath(t, strings.Split(strings.ToLower(x.Value.(string)), "."))
+				vs, b := resolvePath(t, strings.Split(strings.ToLower(x.Value.(string)), "."), true)
 				if !b {
 					return nil, errors.New("Field is unresolveable")
 				}
-				rval = append(rval, *(&Token{
-					Value:    v,
-					Type:     Static,
-					Position: x.Position,
-				}))
+				for _, v := range vs {
+					rval = append(rval, *(&Token{
+						Value:    v,
+						Type:     Static,
+						Position: x.Position,
+					}))
+					//}
+				}
 			}
 		default:
 			return nil, errors.New(fmt.Sprintf("unhandled type in runner:%v\n", x.Type))
