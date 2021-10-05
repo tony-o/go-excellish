@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	lr "example.com/lr/src"
+	fieldCalculator "example.com/lr/pkg/field-calculator"
 	"github.com/gofrs/uuid"
 	"github.com/loov/hrtime"
 )
@@ -51,7 +51,7 @@ func main() {
 		}),
 		Amount: 5,
 	}
-	cartParser := lr.NewParser()
+	cartParser := fieldCalculator.NewParser()
 	err := cartParser.Parse("[product.price] * 10")
 	if err != nil {
 		fmt.Printf("cartParser err=%v\n", err)
@@ -109,9 +109,10 @@ func main() {
 		"1 + 2 / 3 = (2 / 3) + 1":                "",
 		"1 + 2 / 3 = 1":                          "",
 		" 1 + 2 = 5 + 'hello'":                   "",
+		"1 + 1 + 1 + 1 / 4 / 1":                  "",
 	}
 	for k, v := range OK {
-		l := lr.NewParser()
+		l := fieldCalculator.NewParser()
 		var e string = v
 		if v == "" {
 			e = k

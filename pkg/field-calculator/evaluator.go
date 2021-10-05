@@ -1,286 +1,47 @@
-package lr
+package fieldcalculator
 
 import (
 	"errors"
 	"fmt"
-	"math"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
-// TYPES
-type TokenType int8
-
-const (
-	Field TokenType = iota
-	Static
-	Function
-	Operator
-	Scope
-
-	FuncScope
-)
-
-type Token struct {
-	Type     TokenType
-	Value    interface{}
-	Position int
-}
-
-type Env struct {
-	Values map[string]interface{}
-	Parent *Env
-}
-
-var DefaultEnv *Env = &Env{
-	Values: map[string]interface{}{
-		"SUMIF": func(ts []Token) (t Token, e error) {
-			defer func() {
-				if recover() != nil {
-					e = errors.New("Field for SUMIF is not a number or received a bad filter")
-				}
-			}()
-			var f float64 = 0
-			filter := ts[len(ts)-1].Value.([]Token)
-			for idx, t := range ts[:len(ts)-1] {
-				if !filter[idx].Value.(bool) {
-					continue
-				}
-				f += t.Value.(float64)
-			}
-			return *(&Token{
-				Type:  Static,
-				Value: f,
-			}), nil
-		},
-		"SUM": func(ts []Token) (t Token, e error) {
-			defer func() {
-				if recover() != nil {
-					e = errors.New("Field for SUM is not a number")
-				}
-			}()
-			var f float64 = 0
-			for _, t := range ts {
-				f += t.Value.(float64)
-			}
-			return *(&Token{
-				Type:  Static,
-				Value: f,
-			}), nil
-		},
-		"CONCAT": func(t []Token) (interface{}, error) {
-			return nil, nil
-		},
-		"=": func(ts []Token) (Token, error) {
-			l := len(ts) - 1
-			var rts []Token = make([]Token, 0)
-			last := ts[l].Value
-			var floatVal float64
-			floatCmp := false
-			switch last.(type) {
-			case float64:
-				floatVal = last.(float64)
-				floatCmp = true
-			}
-			for i := 0; i < l; i++ {
-				cVal := ts[i].Value
-				if floatCmp {
-					switch cVal.(type) {
-					case float64:
-						if math.Abs(cVal.(float64)-floatVal) < .00001 {
-							rts = append(rts, *(&Token{
-								Value: true,
-								Type:  Static,
-							}))
-						} else {
-							rts = append(rts, *(&Token{
-								Value: false,
-								Type:  Static,
-							}))
-						}
-						continue
-					}
-				}
-				if fmt.Sprint(cVal) == fmt.Sprint(last) {
-					rts = append(rts, *(&Token{
-						Value: true,
-						Type:  Static,
-					}))
-				} else {
-					rts = append(rts, *(&Token{
-						Value: false,
-						Type:  Static,
-					}))
-				}
-			}
-			return *(&Token{
-				Value: rts,
-				Type:  Scope,
-			}), nil
-		},
-		">": func(ts []Token) (Token, error) {
-			l := len(ts) - 1
-			var rts []Token = make([]Token, 0)
-			b := ts[l].Value
-			strcmp := true
-			switch b.(type) {
-			case float64:
-				strcmp = false
-			}
-			for i := 0; i < l; i++ {
-				a := ts[i].Value
-				if !strcmp {
-					switch a.(type) {
-					case float64:
-						if a.(float64) > b.(float64) {
-							rts = append(rts, *(&Token{
-								Value: true,
-								Type:  Static,
-							}))
-						} else {
-							rts = append(rts, *(&Token{
-								Value: false,
-								Type:  Static,
-							}))
-						}
-						continue
-					}
-				}
-				if fmt.Sprint(b) > fmt.Sprint(a) {
-					rts = append(rts, *(&Token{
-						Value: true,
-						Type:  Static,
-					}))
-				} else {
-					rts = append(rts, *(&Token{
-						Value: false,
-						Type:  Static,
-					}))
-				}
-			}
-			return *(&Token{
-				Value: rts,
-				Type:  Scope,
-			}), nil
-		},
-		"*": func(ts []Token) (t Token, e error) {
-			defer func() {
-				if recover() != nil {
-					e = errors.New("Field for * is not a number")
-				}
-			}()
-			f := ts[0].Value.(float64)
-			for _, t := range ts[1:] {
-				f *= t.Value.(float64)
-			}
-			return *(&Token{
-				Value: f,
-				Type:  Static,
-			}), nil
-		},
-		"/": func(ts []Token) (t Token, e error) {
-			defer func() {
-				if recover() != nil {
-					e = errors.New("Field for / is not a number")
-				}
-			}()
-			f := ts[0].Value.(float64)
-			for _, t := range ts[1:] {
-				f /= t.Value.(float64)
-			}
-			return *(&Token{
-				Value: f,
-				Type:  Static,
-			}), nil
-		},
-		"+": func(ts []Token) (Token, error) {
-			// Degradation float64 -> string
-			stillf := true
-			hadf := false
-			var f float64
-			var s string = ""
-			for _, t := range ts {
-				switch v := t.Value.(type) {
-				default:
-					if stillf {
-						stillf = false
-						if hadf {
-							s += fmt.Sprintf("%0.000f", f)
-						}
-					}
-					s += fmt.Sprint(v)
-				case float64:
-					if stillf {
-						if !hadf {
-							f = v
-							hadf = true
-						} else {
-							f += v
-						}
-					} else {
-						s += fmt.Sprintf("%0.000f", v)
-					}
-				}
-			}
-			var rv interface{}
-			if stillf {
-				rv = f
-			} else {
-				rv = s
-			}
-			return *(&Token{
-				Value: rv,
-				Type:  Static,
-			}), nil
-		},
-	},
-	Parent: nil,
-}
-
-type LR struct {
-	Tokens, fields []Token
-}
-
-// INTERFACES
-type LRI interface {
-	Parse(string) error
-	Run(...interface{}) ([]interface{}, error)
-	AST() string
-	AppliesTo(...interface{}) (bool, error)
-
-	tokenize(_ string) error
-	run([]Token, ...interface{}) ([]interface{}, error)
-	ast([]Token, int) string
-}
-
-var _ LRI = (*LR)(nil)
-
-// IMPLEMENTATION
-func NewParser() *LR {
-	lr := &LR{
+// NewParser creates a new parser with nice defaults
+func NewParser() *Evaluator {
+	ev := &Evaluator{
 		Tokens: make([]Token, 0),
-		fields: make([]Token, 0), //premature optimization
+		fields: make([]Token, 0),
 	}
-	return lr
+	return ev
 }
 
-func resolvePath(s interface{}, path []string, forEval bool) ([]interface{}, bool) {
+// resolvePath traverses struct object until it can't find the field requested or resolves
+//   forEval: will iterate slices so it can return a list of values otherwise this
+//            only tests the first to see if the path is resolvable
+func resolvePath(s interface{}, path []string, forEval bool) (_ []interface{}, bok bool) {
+	defer func() {
+		if recover() != nil {
+			bok = false
+		}
+	}()
 	if (s == nil && len(path) > 0) || len(path) == 0 {
 		return nil, false
 	}
-	v := reflect.Indirect(reflect.ValueOf(s))
+	o := reflect.ValueOf(s)
+	v := reflect.Indirect(o)
 	if v.Kind() == reflect.Slice {
 		if forEval {
 			var r []interface{} = make([]interface{}, 0)
 			for j := 0; j < v.Len(); j++ {
-				ii := v.Index(j).Interface()
-				res, bb := resolvePath(ii, path, forEval)
-				if !bb {
+				vifc := v.Index(j).Interface()
+				if res, bb := resolvePath(vifc, path, forEval); bb {
+					r = append(r, res...)
+				} else {
 					return nil, bb
 				}
-				r = append(r, res...)
 			}
 			return r, true
 		} else {
@@ -300,7 +61,9 @@ func resolvePath(s interface{}, path []string, forEval bool) ([]interface{}, boo
 	return nil, false
 }
 
-func (lr *LR) AppliesTo(s ...interface{}) (bool, error) {
+// AppliesTo returns true/false for whether the evaluation can be applied to struct
+//				   error is returned if something bad happened during evaluation
+func (ev *Evaluator) AppliesTo(s ...interface{}) (bool, error) {
 	checked := make(map[string]bool)
 	for _, o := range s {
 		t := reflect.TypeOf(o)
@@ -308,7 +71,7 @@ func (lr *LR) AppliesTo(s ...interface{}) (bool, error) {
 		if _, ok := checked[tt]; ok {
 			continue
 		}
-		for _, f := range lr.fields {
+		for _, f := range ev.fields {
 			path := strings.Split(f.Value.(string), ".")
 			_, b := resolvePath(o, path, false)
 			if !b {
@@ -319,86 +82,52 @@ func (lr *LR) AppliesTo(s ...interface{}) (bool, error) {
 	return true, nil
 }
 
-func (lr *LR) Run(s ...interface{}) ([]interface{}, error) {
+// Run will run evaluation per interface
+func (ev *Evaluator) Run(ss ...interface{}) ([]interface{}, error) {
 	var results []interface{} = make([]interface{}, 0)
-	//for _, o := range s {
-	res, err := lr.run(lr.Tokens, s...)
+	for _, s := range ss {
+		res, err := ev.run(ev.Tokens, s)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, unwindResult(res)...)
+	}
+	return results, nil
+}
+
+// RunMany will use multiple interfaces for the evaluation
+func (ev *Evaluator) RunMany(s ...interface{}) ([]interface{}, error) {
+	var results []interface{} = make([]interface{}, 0)
+	res, err := ev.run(ev.Tokens, s...)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range res {
-		results = append(results, r.(Token).Value)
+		results = append(results, unwindToken(r.(Token).Value))
 	}
-	//}
 	return results, nil
 }
 
-func (lr *LR) run(tokens []Token, s ...interface{}) ([]interface{}, error) {
-	var rval []interface{} = make([]interface{}, 0)
-	for _, x := range tokens {
-		switch x.Type {
-		case Scope:
-			res, err := lr.run(x.Value.([]Token), s...)
-			if err != nil {
-				return nil, err
-			}
-			rval = append(rval, res...)
-		case FuncScope:
-			args, err := lr.run(x.Value.([]Token)[1:], s...)
-			if err != nil {
-				return nil, err
-			}
-			argTokens := make([]Token, 0)
-			for _, t := range args {
-				argTokens = append(argTokens, t.(Token))
-			}
-			result, err := DefaultEnv.Values[strings.ToUpper(x.Value.([]Token)[0].Value.(string))].(func(_ []Token) (Token, error))(argTokens)
-			if err != nil {
-				return nil, err
-			}
-			rval = append(rval, result)
-		case Static:
-			rval = append(rval, x)
-		case Field:
-			for _, t := range s {
-				vs, b := resolvePath(t, strings.Split(strings.ToLower(x.Value.(string)), "."), true)
-				if !b {
-					return nil, errors.New("Field is unresolveable")
-				}
-				for _, v := range vs {
-					rval = append(rval, *(&Token{
-						Value:    v,
-						Type:     Static,
-						Position: x.Position,
-					}))
-					//}
-				}
-			}
-		default:
-			return nil, errors.New(fmt.Sprintf("unhandled type in runner:%v\n", x.Type))
-		}
-	}
-	return rval, nil
+// Parse tokenizes the calculated field
+func (ev *Evaluator) Parse(s string) error {
+	return ev.tokenize(s)
 }
 
-func (lr *LR) Parse(s string) error {
-	return lr.tokenize(s)
+// AST returns a string of JSON AST
+func (ev *Evaluator) AST() string {
+	return strings.TrimSpace(ev.ast(ev.Tokens, 0))
 }
 
-func (lr *LR) AST() string {
-	return lr.ast(lr.Tokens, 0)
-}
-
-func (lr *LR) ast(tokens []Token, depth int) string {
+func (ev *Evaluator) ast(tokens []Token, depth int) string {
 	bd := strings.Repeat("  ", depth)
 	var ast string = ""
 	for _, x := range tokens {
 		switch x.Type {
 		case Scope:
-			ast += lr.ast(x.Value.([]Token), depth+1)
+			ast += ev.ast(x.Value.([]Token), depth+1)
 		case FuncScope:
 			ast += fmt.Sprintf("%s{\n%s  \"type\": \"func\",\n%s  \"name\": \"%s\",\n%s  \"args\": [\n", bd, bd, bd, x.Value.([]Token)[0].Value.(string), bd)
-			ast += lr.ast(x.Value.([]Token)[1:], depth+2)
+			ast += ev.ast(x.Value.([]Token)[1:], depth+2)
 			ast += fmt.Sprintf("\n%s  ]\n%s},\n", bd, bd)
 		case Static:
 			ast += fmt.Sprintf("%s{ \"type\": \"literal\", \"value\": \"%s\" },\n", bd, x.Value)
@@ -413,15 +142,7 @@ func (lr *LR) ast(tokens []Token, depth int) string {
 	return ast
 }
 
-var opprec map[string]int = map[string]int{
-	"/": 10,
-	"*": 10,
-	"-": 5,
-	"+": 5,
-	"=": 0,
-}
-
-func (lr *LR) tokenize(s string) error {
+func (ev *Evaluator) tokenize(s string) error {
 	idx := (int)(0)
 	ws := regexp.MustCompile(`^[, \t\r\n]+`)
 	stack := [][]Token{[]Token{}}
@@ -433,7 +154,7 @@ func (lr *LR) tokenize(s string) error {
 		stacklen := len(stack) - 1
 		if t, m, err := parseField(idx, s); err == nil && m > 0 {
 			stack[stacklen] = append(stack[stacklen], t)
-			lr.fields = append(lr.fields, t)
+			ev.fields = append(ev.fields, t)
 			idx += m
 		} else if err != nil {
 			return err
@@ -496,8 +217,8 @@ func (lr *LR) tokenize(s string) error {
 			if a.Type == Scope || a.Type == FuncScope {
 				op1, ok1 := a.Value.([]Token)[0].Value.(string)
 				if ok1 {
-					if prec, ok := opprec[op1]; ok {
-						if prec2, ok := opprec[o.Value.(string)]; ok {
+					if prec, ok := operatorPrecedence[op1]; ok {
+						if prec2, ok := operatorPrecedence[o.Value.(string)]; ok {
 							if prec2 > prec {
 								a.Value = append(a.Value.([]Token)[:len(a.Value.([]Token))-1], *(&Token{
 									Type:     FuncScope,
@@ -526,10 +247,58 @@ func (lr *LR) tokenize(s string) error {
 		return errorWithLineAndPos(idx, "Unknown error")
 	}
 	if len(stack[0]) != 1 {
+		fmt.Printf("stack=%v\n", stack)
 		return errorWithLineAndPos(stack[0][0].Position, "Unhandled reduce situation")
 	}
-	lr.Tokens = stack[0]
+	ev.Tokens = stack[0]
 	return nil
+}
+
+func (ev *Evaluator) run(tokens []Token, s ...interface{}) ([]interface{}, error) {
+	var rval []interface{} = make([]interface{}, 0)
+	for _, x := range tokens {
+		switch x.Type {
+		case Scope:
+			res, err := ev.run(x.Value.([]Token), s...)
+			if err != nil {
+				return nil, err
+			}
+			rval = append(rval, res...)
+		case FuncScope:
+			args, err := ev.run(x.Value.([]Token)[1:], s...)
+			if err != nil {
+				return nil, err
+			}
+			argTokens := make([]Token, 0)
+			for _, t := range args {
+				argTokens = append(argTokens, t.(Token))
+			}
+			result, err := DefaultEnv.Values[strings.ToUpper(x.Value.([]Token)[0].Value.(string))].(func(_ []Token) (Token, error))(argTokens)
+			if err != nil {
+				return nil, err
+			}
+			rval = append(rval, result)
+		case Static:
+			rval = append(rval, x)
+		case Field:
+			for _, t := range s {
+				vs, b := resolvePath(t, strings.Split(strings.ToLower(x.Value.(string)), "."), true)
+				if !b {
+					return nil, errors.New("Field is unresolveable")
+				}
+				for _, v := range vs {
+					rval = append(rval, *(&Token{
+						Value:    v,
+						Type:     Static,
+						Position: x.Position,
+					}))
+				}
+			}
+		default:
+			return nil, errors.New(fmt.Sprintf("unhandled type in runner:%v\n", x.Type))
+		}
+	}
+	return rval, nil
 }
 
 func parseStr(idx int, s string) (Token, int, bool) {
@@ -634,4 +403,28 @@ func errorWithLineAndPos(idx int, s string) error {
 		line++
 	}
 	return errors.New(s + fmt.Sprintf(" @ line %d, character %d", line, idx-count))
+}
+
+func unwindResult(xs []interface{}) []interface{} {
+	var r []interface{} = make([]interface{}, 0)
+	for _, x := range xs {
+		r = append(r, unwindToken(x)...)
+	}
+	fmt.Printf("r=%v\n", r)
+	return r
+}
+
+func unwindToken(t interface{}) []interface{} {
+	switch t.(type) {
+	case Token:
+		return unwindToken(t.(Token).Value)
+	case []Token:
+		var rs []interface{} = make([]interface{}, 0)
+		for _, tx := range t.([]Token) {
+			rs = append(rs, unwindToken(tx))
+
+		}
+		return rs
+	}
+	return []interface{}{t}
 }
